@@ -39,12 +39,12 @@
         font-size: 13px;
         text-align: center;
       }
-      main { width: min(920px, calc(100% - 40px)); margin: 42px auto 80px; }
+      main { width: min(900px, calc(100% - 40px)); margin: 42px auto 80px; }
       h1, h2 { padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
       h1 { margin: 0 0 10px; font-size: 2em; line-height: 1.25; }
       h2 { margin-top: 2.2em; font-size: 1.5em; line-height: 1.3; }
       h3 { margin-top: 1.7em; font-size: 1.18em; }
-      p, ul, ol, pre, table, blockquote { margin-top: 0; margin-bottom: 16px; }
+      p, ul, ol, pre, blockquote { margin-top: 0; margin-bottom: 16px; }
       .metadata { margin-bottom: 28px; color: var(--muted); font-size: 14px; }
       .metadata code { color: var(--foreground); }
       .summary { font-size: 17px; }
@@ -61,17 +61,11 @@
       code { padding: 0.2em 0.4em; border-radius: 6px; background: var(--code); font-size: 85%; }
       pre { overflow: auto; padding: 16px; border-radius: 6px; background: var(--subtle); font-size: 14px; line-height: 1.45; }
       pre code { padding: 0; background: transparent; font-size: inherit; }
-      .table-wrap { overflow-x: auto; margin-bottom: 16px; }
-      table { width: 100%; border-spacing: 0; border-collapse: collapse; font-size: 14px; }
-      th, td { padding: 9px 12px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
-      th { background: var(--subtle); font-weight: 600; }
-      tr:nth-child(even) td { background: color-mix(in srgb, var(--subtle) 55%, transparent); }
-      blockquote { padding: 0 1em; border-left: 0.25em solid var(--border); color: var(--muted); }
       .note { padding: 12px 16px; border: 1px solid var(--note-border); border-radius: 6px; background: var(--note); color: #3b2f05; }
       .note strong { display: block; margin-bottom: 3px; }
       footer { margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
       @media (max-width: 640px) {
-        main { width: min(100% - 24px, 920px); margin-top: 28px; }
+        main { width: min(100% - 24px, 900px); margin-top: 28px; }
         h1 { font-size: 1.7em; }
         nav ol { columns: 1; }
       }
@@ -97,240 +91,244 @@
       <h1>IntentRail: authorization-bound execution for A2A</h1>
       <p class="metadata">
         <strong>Status:</strong> Discussion draft &nbsp;·&nbsp;
-        <strong>Last updated:</strong> 3 August 2026 &nbsp;·&nbsp;
+        <strong>Last updated:</strong> 21 August 2026 &nbsp;·&nbsp;
         <strong>Proposed artifact:</strong> <code>experimental-ext-intentrail</code>
       </p>
 
       <p class="summary">
-        IntentRail is a proposed A2A lifecycle extension for actions that have external side
-        effects. The narrow goal is to bind what the requester intended, what was authorized,
-        what was executed, and what outcome was observed.
+        IntentRail is a proposed A2A extension for tasks that can cause an external side effect.
+        It makes four things checkable: what was requested, what was authorized, whether that
+        authorization was already used, and what happened after execution.
       </p>
       <p>
-        This is a proposal for community discussion. It is not a request to change the A2A core
-        transport or introduce a new identity, policy, or reputation system.
+        The proposal is about the execution boundary. It does not change A2A task states or add an
+        identity, policy, payment, or reputation system to A2A.
       </p>
 
       <nav aria-label="Table of contents">
         <strong>Contents</strong>
         <ol>
           <li><a href="#problem">The problem</a></li>
-          <li><a href="#flow">Proposed flow</a></li>
-          <li><a href="#example">Example</a></li>
+          <li><a href="#boundary">Boundary with A2A</a></li>
+          <li><a href="#records">Four linked records</a></li>
+          <li><a href="#lifecycle">Lifecycle</a></li>
+          <li><a href="#integration">A2A carrier</a></li>
+          <li><a href="#replay">Retry and replay</a></li>
+          <li><a href="#conformance">Conformance cases</a></li>
           <li><a href="#scope">Scope</a></li>
-          <li><a href="#related">Related discussions</a></li>
-          <li><a href="#integration">A2A integration</a></li>
-          <li><a href="#questions">Open questions</a></li>
-          <li><a href="#request">Request</a></li>
+          <li><a href="#related">Related work</a></li>
+          <li><a href="#questions">Questions and request</a></li>
         </ol>
       </nav>
 
       <h2 id="problem">The problem</h2>
       <p>
-        A task can be authenticated and authorized, but that does not by itself prove that the
-        same action was executed later.
+        Authentication tells a receiver who sent a request. Authorization can say that the sender
+        is allowed to do something. Neither one, on its own, proves that the action executed later
+        is the same action that was approved.
       </p>
-      <p>Between authorization and execution, several things can go wrong:</p>
+      <p>Between approval and execution:</p>
       <ul>
         <li>parameters can change;</li>
-        <li>constraints can expire or be revoked;</li>
-        <li>an authorization can be reused;</li>
-        <li>a different recipient or resource can be substituted; or</li>
-        <li>a completion message can claim an outcome that is not linked to the authorized action.</li>
+        <li>a recipient or resource can be substituted;</li>
+        <li>a constraint can expire or be revoked;</li>
+        <li>a retry can become a second execution; or</li>
+        <li>a completion record can describe an unrelated outcome.</li>
       </ul>
       <p>
-        A2A provides the task and message lifecycle. IntentRail would define the additional
-        invariants needed at the execution boundary.
+        Applications can solve this privately with metadata and local state. The interoperability
+        question is whether two A2A implementations can apply the same checks and reach the same
+        result.
       </p>
 
-      <h2 id="flow">Proposed flow</h2>
-      <pre><code>PRE-FLIGHT            AUTHORIZE             EXECUTE                VERIFY
-
-What exactly          May this exact        Is the authority       What actually
-is requested?    -&gt;   request run?     -&gt;   still valid and   -&gt;  happened?
-                                             unused?
-
-intent + constraints  scoped decision       execution record       outcome evidence</code></pre>
-
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Stage</th><th>Question</th><th>Minimum record</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>Preflight</td>
-              <td>What exact action, parameters, constraints, and expected outcome are requested?</td>
-              <td>A deterministic digest of the request and constraints</td>
-            </tr>
-            <tr>
-              <td>Authorization</td>
-              <td>May this exact request execute for this task and attempt?</td>
-              <td>A decision bound to the task, attempt, digest, scope, and validity window</td>
-            </tr>
-            <tr>
-              <td>Execution</td>
-              <td>Does the concrete action still match immediately before the side effect?</td>
-              <td>A one-use execution record linked to the authorization</td>
-            </tr>
-            <tr>
-              <td>Outcome</td>
-              <td>What was observed, and does it correspond to the authorized action?</td>
-              <td>An outcome record or evidence reference linked to the execution</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
+      <h2 id="boundary">Boundary with A2A</h2>
+      <p>
+        A2A continues to define discovery, messages, tasks, task state, and returned artifacts.
+        IntentRail adds a versioned extension binding around an A2A task:
+      </p>
+      <pre><code>preflight -&gt; authorization -&gt; execution gate -&gt; outcome -&gt; verification</code></pre>
       <div class="note">
         <strong>Compatibility constraint</strong>
-        The extension should use existing A2A task states and namespaced extension metadata. It
-        should not add new values to A2A core enums.
+        The extension uses existing A2A extension negotiation and namespaced metadata. It does not
+        add values to A2A core enums or reinterpret an A2A <code>taskId</code>.
       </div>
 
-      <h2 id="example">Example</h2>
-      <pre><code>Requested action
-  transfer 100 USD to vendor-A
+      <h2 id="records">The four linked records</h2>
+      <h3>1. Preflight proposal</h3>
+      <p>
+        The requester records the objective, intended side effect, constraints, requesting party,
+        and creation time. Once submitted, the proposal is immutable. A material change creates a
+        new proposal, optionally linked to the one it replaces.
+      </p>
 
-Authorization
-  allow once
-  amount must equal 100 USD
-  recipient must equal vendor-A
-  valid for task T, attempt 1
+      <h3>2. Authorization decision</h3>
+      <p>
+        An authorized party accepts, rejects, or counters the proposal. Acceptance creates an
+        immutable execution contract containing the approved action and constraints. A deployment
+        may attach signed approvals or a signed decision receipt.
+      </p>
+      <p>
+        IntentRail does not prescribe the policy language, credential, or service used to reach the
+        decision. It requires the execution boundary to verify the decision that it relies on.
+      </p>
 
-Attempt: transfer 500 USD to vendor-A
-  rejected before the side effect because the amount changed
+      <h3>3. Execution identity</h3>
+      <p>
+        The accepted contract supplies a stable execution identity, currently called
+        <code>contractId</code>. It is separate from A2A <code>taskId</code>: the contract identifies
+        the authorized lifecycle, while the task identifier keeps its normal A2A meaning.
+      </p>
+      <p>
+        Immediately before dispatch, the receiver checks the stored contract, caller, constraints,
+        approvals, and state. It reserves the contract atomically and calls the task handler only
+        after that succeeds.
+      </p>
 
-Attempt: transfer 100 USD to vendor-A
-  permitted; authorization is consumed
+      <h3>4. Outcome record</h3>
+      <p>
+        After execution, the executor records outcome evidence linked to the contract: what was
+        observed, when it occurred, and which artifacts or digests support it. Evidence is verified,
+        not accepted as true merely because the executor submitted it.
+      </p>
 
-Replay: transfer 100 USD to vendor-A
-  rejected because the authorization has already been used
+      <h2 id="lifecycle">Lifecycle</h2>
+      <pre><code>PROPOSED -&gt; ACCEPTED -&gt; EXECUTING -&gt; COMPLETED -&gt; VERIFIED
 
-Outcome
-  references the execution record and the authorization that permitted it</code></pre>
+PROPOSED -&gt; REJECTED
+ACCEPTED -&gt; CANCELLED
+EXECUTING -&gt; FAILED
+COMPLETED -&gt; COMPENSATION_REQUIRED -&gt; COMPENSATED</code></pre>
+      <p>
+        An implementation rejects a transition that is not allowed. Successful transitions produce
+        ordered audit records so the current state can be explained later.
+      </p>
+
+      <h2 id="integration">Initial A2A carrier</h2>
+      <p>
+        The exact wire shape is open for discussion. A small binding could carry the accepted
+        contract identifier and the material needed to verify execution authorization:
+      </p>
+      <pre><code>{
+  "version": "draft",
+  "contractId": "ctr_123",
+  "authorization": {
+    "facts": { "environment": "production" },
+    "approvals": []
+  }
+}</code></pre>
+      <p>
+        The object sits under the extension URI in A2A message metadata. The same URI appears in
+        <code>message.extensions</code>, and the Agent Card advertises support and whether the
+        extension is required.
+      </p>
+      <p>At the receiving boundary, the implementation:</p>
+      <ol>
+        <li>confirms that the message activated the advertised extension;</li>
+        <li>loads the contract from a trusted store;</li>
+        <li>verifies that the authenticated caller may execute it;</li>
+        <li>checks the contract state, constraints, and approvals;</li>
+        <li>reserves the execution identity; and</li>
+        <li>only then calls the A2A task handler.</li>
+      </ol>
+
+      <h2 id="replay">Retry and replay</h2>
+      <p>
+        Content integrity and replay protection are different concerns. A digest can show that a
+        record changed, but it cannot show whether the action already ran. Replay handling is
+        therefore stateful:
+      </p>
+      <ul>
+        <li>an exact transport retry resolves to the existing A2A task or stored result;</li>
+        <li>the same idempotency key with different input is rejected;</li>
+        <li>an accepted contract can enter execution only once;</li>
+        <li>repeated delivery cannot call the task handler again; and</li>
+        <li>crash recovery must not create a second side effect.</li>
+      </ul>
+      <p>
+        Canonicalization is limited to versioned IntentRail records that are hashed or signed. The
+        proposal does not define a universal content identity for every agent action or replace
+        identifiers owned by another protocol.
+      </p>
+
+      <h2 id="conformance">Initial conformance cases</h2>
+      <ol>
+        <li>A valid accepted contract is dispatched once.</li>
+        <li>Missing or invalid authorization is rejected before dispatch.</li>
+        <li>A constraint mismatch is rejected before dispatch.</li>
+        <li>An exact retry returns the existing task without redispatch.</li>
+        <li>An idempotency key reused with different input is rejected.</li>
+        <li>A contract already in execution cannot invoke the task handler again.</li>
+        <li>Outcome evidence linked to another contract is rejected.</li>
+        <li>An invalid transition leaves stored state unchanged.</li>
+        <li>A failed outcome can enter compensation without losing its original links.</li>
+        <li>Crash recovery does not repeat the side effect.</li>
+        <li>A multi-hop authorization cannot silently widen its approved scope.</li>
+      </ol>
 
       <h2 id="scope">Scope</h2>
-      <h3>What IntentRail would define</h3>
+      <h3>IntentRail would define</h3>
       <ul>
-        <li>A versioned A2A extension identifier and activation rules.</li>
-        <li>A minimal preflight record for action, parameters, constraints, and expected outcome.</li>
-        <li>A binding between an authorization decision, task, attempt, and preflight digest.</li>
-        <li>Rules for revalidation immediately before execution.</li>
-        <li>One-use and replay-prevention semantics.</li>
-        <li>A minimal binding between execution and outcome evidence.</li>
-        <li>Error behavior and conformance cases for invalid transitions.</li>
+        <li>extension version negotiation and activation;</li>
+        <li>minimum lifecycle records and their linkage;</li>
+        <li>checks required at the execution boundary;</li>
+        <li>retry, replay, and partial-failure behavior;</li>
+        <li>outcome linkage and verification states; and</li>
+        <li>deterministic errors and conformance cases.</li>
+      </ul>
+      <h3>IntentRail would not define</h3>
+      <ul>
+        <li>agent identity or credential issuance;</li>
+        <li>a universal authorization token;</li>
+        <li>a policy language or risk score;</li>
+        <li>a payment or settlement protocol;</li>
+        <li>a global evidence store; or</li>
+        <li>a replacement for A2A transport or task state.</li>
       </ul>
 
-      <h3>What IntentRail would not define</h3>
+      <h2 id="related">Related A2A discussions</h2>
       <ul>
-        <li>Agent identity or credential issuance.</li>
-        <li>A universal authorization token format.</li>
-        <li>A policy language or policy decision service.</li>
-        <li>Reputation, trust scores, or risk scoring.</li>
-        <li>A global evidence store.</li>
-        <li>A replacement for A2A transport bindings or the core task model.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/1769">#1769</a> — verifier-side admission and permit, evidence, and receipt artifacts.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/1716">#1716</a> — capability enforcement at the skill boundary.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/1956">#1956</a> — structured business intent and fulfillment constraints.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/1976">#1976</a> — requester acceptance or rejection of task output.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/1847">#1847</a> — post-execution receipts linked to upstream authority.</li>
+        <li><a href="https://github.com/a2aproject/A2A/issues/2133">#2133</a> — exact-message authorization for consequential actions.</li>
       </ul>
       <p>
-        An implementation could use OAuth, capability tokens, signed permits, local policy engines,
-        or another authorization system. IntentRail would define how the result is bound to an A2A
-        task execution, rather than choosing that system itself.
+        These appear related and potentially complementary, but none is assumed as a dependency. I
+        may have missed another discussion or misunderstood the intended boundary of one of these
+        issues; pointers and corrections are welcome.
       </p>
 
-      <h2 id="related">Relationship to existing A2A discussions</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Discussion</th><th>Primary concern</th><th>Relationship to IntentRail</th></tr></thead>
-          <tbody>
-            <tr>
-              <td><a href="https://github.com/a2aproject/A2A/issues/1769">#1769</a></td>
-              <td>Verifier-side admission and adjacent permit/evidence/receipt artifacts</td>
-              <td>IntentRail can carry references to those artifacts while defining A2A task and execution invariants</td>
-            </tr>
-            <tr>
-              <td><a href="https://github.com/a2aproject/A2A/issues/1716">#1716</a></td>
-              <td>Capability-token enforcement at the skill boundary</td>
-              <td>A capability token can supply the authorization consumed by IntentRail</td>
-            </tr>
-            <tr>
-              <td><a href="https://github.com/a2aproject/A2A/issues/1956">#1956</a></td>
-              <td>Structured business intent and fulfillment constraints</td>
-              <td>An intent descriptor can supply part of the preflight record</td>
-            </tr>
-            <tr>
-              <td><a href="https://github.com/a2aproject/A2A/issues/1976">#1976</a></td>
-              <td>Requester acceptance or rejection of task output</td>
-              <td>Acceptance can be an outcome signal, but does not prove execution matched authority</td>
-            </tr>
-            <tr>
-              <td><a href="https://github.com/a2aproject/A2A/issues/1847">#1847</a></td>
-              <td>Post-execution receipts linked to upstream authority</td>
-              <td>Such a receipt can supply outcome evidence; IntentRail defines its lifecycle binding</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <p>
-        The closest architectural discussion is #1769. It places full verifier artifacts in an
-        adjacent layer and asks A2A to carry references. IntentRail is concerned with the A2A-side
-        lifecycle rules that prevent an authorized request from becoming a materially different or
-        repeated execution.
-      </p>
-      <p>
-        These approaches can coexist. IntentRail does not require ownership of the permit, policy,
-        or receipt formats referenced by a task.
-      </p>
-
-      <h2 id="integration">Initial A2A integration approach</h2>
+      <h2 id="questions">Questions and request</h2>
       <ol>
-        <li>The agent declares support through an <code>AgentExtension</code> URI.</li>
-        <li>The client activates it using normal A2A extension negotiation.</li>
-        <li>
-          Records are carried in namespaced task or message metadata, or by stable references where
-          the complete artifact belongs outside A2A.
-        </li>
-        <li>Existing A2A task states remain unchanged.</li>
-        <li>The extension defines permitted lifecycle transitions and the checks for each transition.</li>
-        <li>Unsupported clients and agents continue using ordinary A2A behavior.</li>
+        <li>Is this lifecycle narrow enough to be an A2A extension?</li>
+        <li>Should the binding carry full authorization material, a stable reference, or both?</li>
+        <li>Which record fields need canonicalization for independent verification?</li>
+        <li>Which retry, timeout, and crash cases should be mandatory conformance tests?</li>
+        <li>How should multi-hop authorization be linked without changing A2A task identity?</li>
+        <li>Which outcome fields belong in metadata, normal artifacts, or external evidence?</li>
       </ol>
-      <blockquote>
-        The exact metadata shape should be developed through the proposal discussion, not treated
-        as settled in the first issue.
-      </blockquote>
-
-      <h2 id="questions">Questions for maintainers and the community</h2>
-      <ol>
-        <li>Is an A2A lifecycle profile the right place for this boundary, or should it remain adjacent?</li>
-        <li>Should the extension define only digest-bound references, or also minimal record shapes?</li>
-        <li>Should one-use authority be scoped to a task and attempt, or another correlation unit?</li>
-        <li>Which task transitions best anchor execution revalidation and outcome binding?</li>
-        <li>Are there other proposals that should be treated as dependencies or prior work?</li>
-      </ol>
-
-      <h2 id="request">Request</h2>
       <p>
-        We are seeking community review and, if maintainers agree that this boundary belongs within
-        A2A's extension model, sponsorship for an <code>experimental-ext-intentrail</code> repository.
-      </p>
-      <p>
-        Maintainer sponsorship would provide an incubation location and initial oversight. It would
-        not make IntentRail part of A2A core or require existing authorization and receipt proposals
-        to adopt the same architecture.
+        If A2A maintainers agree that this boundary belongs in the extension model, I am looking for
+        a maintainer sponsor for an <code>experimental-ext-intentrail</code> repository. I am
+        prepared to maintain the experimental work and its conformance fixtures.
       </p>
       <p>
         See the
-        <a href="https://github.com/a2aproject/A2A/blob/main/docs/topics/extension-and-binding-governance.md">A2A extension and protocol binding governance</a>
-        for the experimental-extension process.
+        <a href="https://github.com/a2aproject/A2A/blob/main/docs/topics/extension-and-binding-governance.md">A2A extension and protocol binding governance</a>.
       </p>
 
       <h2>Implementation status</h2>
       <p>
-        A prototype and conformance work exist, but the implementation repository will remain
-        private while security hardening is completed. This initial proposal is about agreeing on
-        the protocol boundary and incubation direction.
+        A prototype and conformance work exist. The implementation repository remains private while
+        release and security work is completed. This public proposal is intended to be reviewable
+        without access to that code.
       </p>
 
       <footer>
-        Discussion draft for community review. The implementation repository remains private during security hardening.
+        <a href="https://github.com/a2aproject/A2A/issues/2098">Discussion: a2aproject/A2A#2098</a>
+        &nbsp;·&nbsp; Apache-2.0
       </footer>
     </main>
   </body>
